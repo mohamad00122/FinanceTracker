@@ -1,0 +1,16 @@
+# Ignore GoogleService file
+FinanceTracker/GoogleService-Info.plist
+
+# Ignore user settings
+*.xcuserdata
+*.xccheckout
+*.moved-aside
+
+# Ignore build files
+DerivedData/
+
+# Ignore personal schemes
+xcshareddata/
+
+# Ignore Firebase Pods Cache
+Pods/

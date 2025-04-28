@@ -1,17 +1,13 @@
-//
-//  FinanceTrackerApp.swift
-//  FinanceTracker
-//
-//  Created by Mohamad Chokr on 4/15/25.
-//
-
 import SwiftUI
+import FirebaseCore
 
 @main
 struct FinanceTrackerApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
         }
     }
 }

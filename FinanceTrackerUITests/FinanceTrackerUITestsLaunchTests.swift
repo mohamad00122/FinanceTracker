@@ -6,6 +6,8 @@
 //
 
 import XCTest
+import LinkKit
+
 
 final class FinanceTrackerUITestsLaunchTests: XCTestCase {
 

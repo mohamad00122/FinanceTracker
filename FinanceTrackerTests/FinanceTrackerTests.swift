@@ -6,6 +6,8 @@
 //
 
 import Testing
+import LinkKit
+
 
 struct FinanceTrackerTests {
 
