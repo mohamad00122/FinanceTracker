@@ -281,6 +281,7 @@ struct ContentView: View {
     }
 
     func calculateMonthlyTotals() -> [(String, Double)] {
+
         let grouped = Dictionary(grouping: transactions) { txn in
             let date = parseDate(txn.date)
             let formatter = DateFormatter()
@@ -289,9 +290,18 @@ struct ContentView: View {
         }
 
         return grouped.map { (month, txns) in
-            (month, txns.map { $0.amount }.reduce(0, +))
+            let total = txns.map { $0.amount }.reduce(0, +)
+            return (month, total)
         }
-        .sorted { $0.0 < $1.0 }
+        .sorted { (lhs, rhs) in
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM yyyy"
+            guard let lhsDate = formatter.date(from: lhs.0),
+                  let rhsDate = formatter.date(from: rhs.0) else {
+                return lhs.0 < rhs.0
+            }
+            return lhsDate < rhsDate
+        }
     }
 
     func parseDate(_ dateString: String) -> Date {
