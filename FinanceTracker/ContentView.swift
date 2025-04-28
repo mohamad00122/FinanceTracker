@@ -16,108 +16,11 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if viewModel.bankAccounts.isEmpty {
-                        VStack(spacing: 16) {
-                            Text("No Bank Account Connected")
-                                .font(.headline)
-
-                            Text("Connect your bank account to view your spending data.")
-                                .font(.subheadline)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
-
-                            Button(action: {
-                                fetchLinkToken()
-                            }) {
-                                Label("Connect Bank Account", systemImage: "link")
-                                    .font(.headline)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(10)
-                            }
-                            .padding(.top, 10)
-                        }
-                        .padding()
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(20)
-                        .padding(.horizontal)
-                        .shadow(radius: 10)
-                        .padding(.top)
+                        noBankConnectedView
                     } else {
-                        Group {
-                            VStack(spacing: 16) {
-                                Text("Finance Tracker")
-                                    .font(.largeTitle)
-                                    .bold()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                SpendingComparisonView(
-                                    currentFormatted: calculateThisMonth().formattedCurrency(),
-                                    averageFormatted: calculateAvg().formattedCurrency()
-                                )
-
-                                SpendingChartView(
-                                    thisMonthAmount: calculateThisMonth(),
-                                    averageAmount: calculateAvg()
-                                )
-                                .frame(height: 220)
-
-                                Text("Plaid Status: Connected")
-                                    .font(.footnote)
-                                    .foregroundColor(.gray)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding()
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(20)
-                            .padding(.horizontal)
-                            .shadow(radius: 8)
-                        }
-
-                        Group {
-                            VStack(alignment: .leading, spacing: 12) {
-                                HStack {
-                                    Text("Recent Transactions")
-                                        .font(.title2)
-                                        .bold()
-
-                                    Spacer()
-
-                                    Button(action: {
-                                        withAnimation {
-                                            showAllTransactions.toggle()
-                                        }
-                                    }) {
-                                        Image(systemName: showAllTransactions ? "chevron.up" : "chevron.down")
-                                            .foregroundColor(.blue)
-                                    }
-                                }
-
-                                if showAllTransactions {
-                                    TextField("Search transactions", text: $searchText)
-                                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                                        .padding(.bottom, 5)
-                                }
-
-                                VStack(spacing: 12) {
-                                    ForEach(filteredTransactions.prefix(showAllTransactions ? 100 : 3), id: \.id) { txn in
-                                        TransactionRowView(transaction: txn)
-                                            .padding()
-                                            .background(Color(UIColor.secondarySystemBackground))
-                                            .cornerRadius(16)
-                                            .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-                                    }
-                                }
-                            }
-                            .padding()
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(20)
-                            .padding(.horizontal)
-                            .shadow(radius: 8)
-                        }
+                        dashboardView
                     }
-
+                    
                     Spacer(minLength: 40)
                 }
                 .padding(.vertical)
@@ -144,6 +47,105 @@ struct ContentView: View {
                         isLinkPresented = false
                     }
                 )
+            }
+        }
+    }
+
+    private var noBankConnectedView: some View {
+        VStack(spacing: 16) {
+            Text("No Bank Account Connected")
+                .font(.headline)
+
+            Text("Connect your bank account to view your spending data.")
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            Button(action: {
+                fetchLinkToken()
+            }) {
+                Label("Connect Bank Account", systemImage: "link")
+                    .font(.headline)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+            }
+            .padding(.top, 10)
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal)
+        .shadow(radius: 10)
+        .padding(.top)
+    }
+
+    private var dashboardView: some View {
+        VStack(spacing: 16) {
+            Text("Finance Tracker")
+                .font(.largeTitle)
+                .bold()
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            SpendingComparisonView(
+                currentFormatted: calculateThisMonth().formattedCurrency(),
+                averageFormatted: calculateAvg().formattedCurrency()
+            )
+
+            SpendingChartView(
+                monthlyTotals: calculateMonthlyTotals()
+            )
+            .frame(height: 220)
+
+            Text("Plaid Status: Connected")
+                .font(.footnote)
+                .foregroundColor(.gray)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            transactionsView
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal)
+        .shadow(radius: 8)
+    }
+    
+    private var transactionsView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent Transactions")
+                    .font(.title2)
+                    .bold()
+
+                Spacer()
+
+                Button(action: {
+                    withAnimation {
+                        showAllTransactions.toggle()
+                    }
+                }) {
+                    Image(systemName: showAllTransactions ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.blue)
+                }
+            }
+
+            if showAllTransactions {
+                TextField("Search transactions", text: $searchText)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .padding(.bottom, 5)
+            }
+
+            VStack(spacing: 12) {
+                ForEach(filteredTransactions.prefix(showAllTransactions ? 100 : 3), id: \.id) { txn in
+                    TransactionRowView(transaction: txn)
+                        .padding()
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(16)
+                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+                }
             }
         }
     }
