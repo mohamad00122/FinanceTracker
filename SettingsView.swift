@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import FirebaseFirestore
 
 struct SettingsView: View {
     @EnvironmentObject private var viewModel: BankAccountsViewModel
@@ -7,7 +8,7 @@ struct SettingsView: View {
     @State private var linkToken: String = ""
     @State private var isLinkPresented = false
     @State private var errorMessage = ""
-
+    
     var body: some View {
         NavigationView {
             List {
@@ -28,7 +29,7 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 8)
                 }
-
+                
                 // — Bank Connection
                 Section(header: Text("BANK CONNECTION")) {
                     if viewModel.accounts.isEmpty {
@@ -40,7 +41,7 @@ struct SettingsView: View {
                     } else {
                         Label("Bank Account Connected", systemImage: "checkmark.circle.fill")
                             .foregroundColor(.green)
-
+                        
                         Button {
                             fetchLinkToken()
                         } label: {
@@ -48,7 +49,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-
+                
                 // — Logout
                 Section {
                     Button(role: .destructive) {
@@ -57,7 +58,7 @@ struct SettingsView: View {
                         Label("Log Out", systemImage: "arrowshape.turn.up.left")
                     }
                 }
-
+                
                 // — Errors
                 if !errorMessage.isEmpty {
                     Section {
@@ -89,9 +90,9 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     // MARK: – Actions
-
+    
     private func logout() {
         do {
             try Auth.auth().signOut()
@@ -99,19 +100,19 @@ struct SettingsView: View {
             errorMessage = error.localizedDescription
         }
     }
-
+    
     private func fetchLinkToken() {
         guard let url = URL(string: "\(Constants.serverBaseURL)/api/create_link_token") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-
+        
         URLSession.shared.dataTask(with: request) { data, _, _ in
             guard
                 let data = data,
                 let result = try? JSONDecoder().decode([String: String].self, from: data),
                 let token = result["link_token"]
             else { return }
-
+            
             DispatchQueue.main.async {
                 self.linkToken = token
                 self.isLinkPresented = true
@@ -119,16 +120,15 @@ struct SettingsView: View {
         }
         .resume()
     }
-
+    
     private func exchangePublicToken(_ publicToken: String, completion: @escaping (String?) -> Void) {
         guard
             let url = URL(string: "\(Constants.serverBaseURL)/api/exchange_public_token"),
             let userId = Auth.auth().currentUser?.uid
         else {
-            completion(nil)
-            return
+            completion(nil); return
         }
-
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -136,23 +136,41 @@ struct SettingsView: View {
             "public_token": publicToken,
             "user_id": userId
         ])
-
-        URLSession.shared.dataTask(with: request) { data, response, _ in
-            if let httpRes = response as? HTTPURLResponse {
-                print("HTTP Status Code:", httpRes.statusCode)
-            }
+        
+        URLSession.shared.dataTask(with: request) { data, _, _ in
             guard
                 let data = data,
-                let result = try? JSONDecoder().decode([String: String].self, from: data),
+                let result = try? JSONDecoder().decode([String:String].self, from: data),
                 let token = result["access_token"]
             else {
-                print("❌ Token exchange failed or response was invalid.")
-                completion(nil)
-                return
+                completion(nil); return
             }
-            print("✅ Access token received: \(token)")
+            
+            // **Persist the new bank account in Firestore**
+            let db = Firestore.firestore()
+            let acctRef = db
+                .collection("users")
+                .document(userId)
+                .collection("bank_accounts")
+                .document("primary")   // you can generate an ID or use "primary"
+            acctRef.setData([
+                "accessToken": token,
+                "linkedAt": Timestamp(date: Date())
+            ]) { err in
+                DispatchQueue.main.async {
+                    if let err = err {
+                        print("Firestore write failed:", err)
+                    } else {
+                        print("✅ BankAccount saved in Firestore")
+                        self.accessToken = token
+                        viewModel.fetchAccounts()
+                        viewModel.fetchAllTransactions()
+                    }
+                    isLinkPresented = false
+                }
+            }
+            
             completion(token)
-        }
-        .resume()
+        }.resume()
     }
 }
