@@ -1,13 +1,12 @@
 import SwiftUI
 import FirebaseAuth
-import FirebaseFirestore
 
 struct ContentView: View {
-    @StateObject private var viewModel = BankAccountsViewModel()
-    @State private var transactions: [PlaidTransaction] = []
-    @State private var linkToken: String = ""
+    @EnvironmentObject var vm: BankAccountsViewModel
+    @State private var linkToken = ""
     @State private var isLinkPresented = false
-    @State private var errorMessage = ""
+    @State private var errorMessage: String?
+    @State private var showingError = false
     @State private var showAllTransactions = false
     @State private var searchText = ""
 
@@ -15,20 +14,17 @@ struct ContentView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 16) {
-                    if viewModel.bankAccounts.isEmpty {
+                    if vm.accounts.isEmpty {
                         noBankConnectedView
                     } else {
                         dashboardView
                     }
-                    
                     Spacer(minLength: 40)
                 }
                 .padding(.vertical)
                 .onAppear {
-                    viewModel.fetchBankAccounts()
-                    if let user = Auth.auth().currentUser {
-                        fetchAccessTokens(for: user.uid)
-                    }
+                    vm.fetchAccounts()
+                    vm.fetchAllTransactions()
                 }
             }
             .navigationTitle("Dashboard")
@@ -36,15 +32,21 @@ struct ContentView: View {
                 PlaidLinkView(
                     linkToken: linkToken,
                     onSuccess: { publicToken in
-                        exchangePublicToken(publicToken) { token in
-                            if token != nil {
-                                viewModel.fetchBankAccounts()
-                            }
+                        exchangePublicToken(publicToken) {
+                            vm.fetchAccounts()
+                            vm.fetchAllTransactions()
                             isLinkPresented = false
                         }
                     },
-                    onExit: { _ in
-                        isLinkPresented = false
+                    onExit: { _ in isLinkPresented = false }
+                )
+            }
+            .alert(isPresented: $showingError) {
+                Alert(
+                    title: Text("Error"),
+                    message: Text(errorMessage ?? ""),
+                    dismissButton: .default(Text("OK")) {
+                        errorMessage = nil
                     }
                 )
             }
@@ -53,82 +55,50 @@ struct ContentView: View {
 
     private var noBankConnectedView: some View {
         VStack(spacing: 16) {
-            Text("No Bank Account Connected")
-                .font(.headline)
-
+            Text("No Bank Account Connected").font(.headline)
             Text("Connect your bank account to view your spending data.")
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-
-            Button(action: {
-                fetchLinkToken()
-            }) {
-                Label("Connect Bank Account", systemImage: "link")
-                    .font(.headline)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-            }
-            .padding(.top, 10)
+                .font(.subheadline).multilineTextAlignment(.center).padding(.horizontal)
+            Button("Connect Bank Account") { fetchLinkToken() }
+                .font(.headline).padding().frame(maxWidth: .infinity)
+                .background(Color.blue).foregroundColor(.white).cornerRadius(10)
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .cornerRadius(20)
-        .padding(.horizontal)
-        .shadow(radius: 10)
-        .padding(.top)
+        .padding().background(.ultraThinMaterial).cornerRadius(20)
+        .padding(.horizontal).shadow(radius: 10).padding(.top)
     }
 
     private var dashboardView: some View {
         VStack(spacing: 16) {
-            Text("Finance Tracker")
-                .font(.largeTitle)
-                .bold()
+            Text("Finance Tracker").font(.largeTitle).bold()
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            // comparison cards
             SpendingComparisonView(
                 currentFormatted: calculateThisMonth().formattedCurrency(),
                 averageFormatted: calculateAvg().formattedCurrency()
             )
 
+            // line + rule chart
             SpendingChartView(
-              monthlyTotals: calculateMonthlyTotals(),
-              average:           calculateAvg()
-            )
-            .frame(height: 220)
-
+                monthlyTotals: calculateMonthlyTotals(),
+                average: calculateAvg()
+            ).frame(height: 220)
 
             Text("Plaid Status: Connected")
-                .font(.footnote)
-                .foregroundColor(.gray)
+                .font(.footnote).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             transactionsView
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .cornerRadius(20)
-        .padding(.horizontal)
-        .shadow(radius: 8)
+        .padding().background(.ultraThinMaterial).cornerRadius(20)
+        .padding(.horizontal).shadow(radius: 8)
     }
-    
+
     private var transactionsView: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Recent Transactions")
-                    .font(.title2)
-                    .bold()
-
+                Text("Recent Transactions").font(.title2).bold()
                 Spacer()
-
-                Button(action: {
-                    withAnimation {
-                        showAllTransactions.toggle()
-                    }
-                }) {
+                Button { withAnimation { showAllTransactions.toggle() } } label: {
                     Image(systemName: showAllTransactions ? "chevron.up" : "chevron.down")
                         .foregroundColor(.blue)
                 }
@@ -140,40 +110,35 @@ struct ContentView: View {
                     .padding(.bottom, 5)
             }
 
-            VStack(spacing: 12) {
-                ForEach(filteredTransactions.prefix(showAllTransactions ? 100 : 3), id: \.id) { txn in
-                    TransactionRowView(transaction: txn)
-                        .padding()
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(16)
-                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-                }
+            ForEach(filteredTransactions.prefix(showAllTransactions ? 100 : 3)) { txn in
+                TransactionRowView(transaction: txn)
+                    .padding().background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(16)
+                    .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
             }
         }
     }
 
-    var filteredTransactions: [PlaidTransaction] {
+    private var filteredTransactions: [PlaidTransaction] {
         if searchText.isEmpty {
-            return transactions
+            return vm.transactions
         } else {
-            return transactions.filter {
-                $0.name.localizedCaseInsensitiveContains(searchText) ||
-                ($0.category?.joined(separator: ", ").localizedCaseInsensitiveContains(searchText) ?? false)
+            return vm.transactions.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText)
+                || ($0.category?.joined(separator: ", ").localizedCaseInsensitiveContains(searchText) ?? false)
             }
         }
     }
 
-    // MARK: - Plaid Logic
+    // MARK: – Plaid Link & Token Exchange
+
     private func fetchLinkToken() {
         guard let url = URL(string: "\(Constants.serverBaseURL)/api/create_link_token") else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        var req = URLRequest(url: url); req.httpMethod = "POST"
+        URLSession.shared.dataTask(with: req) { data, _, _ in
             if let data = data,
-               let result = try? JSONDecoder().decode([String: String].self, from: data),
-               let token = result["link_token"] {
+               let res = try? JSONDecoder().decode([String:String].self, from: data),
+               let token = res["link_token"] {
                 DispatchQueue.main.async {
                     self.linkToken = token
                     self.isLinkPresented = true
@@ -182,155 +147,69 @@ struct ContentView: View {
         }.resume()
     }
 
-    private func exchangePublicToken(_ publicToken: String, completion: @escaping (String?) -> Void) {
+    private func exchangePublicToken(_ publicToken: String, completion: @escaping ()->Void) {
         guard let url = URL(string: "\(Constants.serverBaseURL)/api/exchange_public_token"),
-              let userId = Auth.auth().currentUser?.uid else {
-            completion(nil)
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let payload: [String: String] = [
+              let userId = Auth.auth().currentUser?.uid else { return }
+        var req = URLRequest(url: url); req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
             "public_token": publicToken,
             "user_id": userId
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-
-        URLSession.shared.dataTask(with: request) { data, response, _ in
-            if let httpRes = response as? HTTPURLResponse {
-                print("HTTP Status Code:", httpRes.statusCode)
-            }
-
-            guard let data = data,
-                  let result = try? JSONDecoder().decode([String: String].self, from: data),
-                  let token = result["access_token"] else {
-                print("❌ Token exchange failed or response was invalid.")
-                completion(nil)
-                return
-            }
-
-            print("✅ Access token received: \(token)")
-            completion(token)
+        ])
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            completion()
         }.resume()
     }
 
-    // MARK: - Transaction Fetching
-    func fetchAccessTokens(for userId: String) {
-        let db = Firestore.firestore()
-        db.collection("users").document(userId).collection("bank_accounts").getDocuments { snapshot, error in
-            if let error = error {
-                print("Error fetching tokens:", error)
-                return
-            }
+    // MARK: – Calculations
 
-            let tokens = snapshot?.documents.compactMap { $0.data()["access_token"] as? String } ?? []
-            for token in tokens {
-                fetchTransactions(token)
-            }
-        }
-    }
-
-    func fetchTransactions(_ token: String) {
-        guard let url = URL(string: "\(Constants.serverBaseURL)/api/transactions") else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: String] = ["access_token": token]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            guard let data = data else {
-                print("❌ No transaction data")
-                return
-            }
-
-            if let httpResponse = response as? HTTPURLResponse {
-                print("HTTP Status Code:", httpResponse.statusCode)
-                print("Raw Response:", String(data: data, encoding: .utf8) ?? "<invalid>")
-            }
-
-            do {
-                let txns = try JSONDecoder().decode([PlaidTransaction].self, from: data)
-                DispatchQueue.main.async {
-                    self.transactions.append(contentsOf: txns)
-                }
-            } catch {
-                print("Decode error:", error)
-            }
-        }.resume()
-    }
-
-    // MARK: - Helpers
-    func calculateThisMonth() -> Double {
+    private func calculateThisMonth() -> Double {
         let currentMonth = Calendar.current.component(.month, from: Date())
-        return transactions
+        return vm.transactions
             .filter { Calendar.current.component(.month, from: parseDate($0.date)) == currentMonth }
-            .map { $0.amount }
-            .reduce(0, +)
+            .map(\.amount).reduce(0, +)
     }
 
-    func calculateAvg() -> Double {
-        let months = Set(transactions.map {
+    private func calculateAvg() -> Double {
+        let months = Set(vm.transactions.map {
             Calendar.current.component(.month, from: parseDate($0.date))
         })
-        let total = transactions.map { $0.amount }.reduce(0, +)
-        return months.count > 0 ? total / Double(months.count) : 0
+        let total = vm.transactions.map(\.amount).reduce(0, +)
+        return months.isEmpty ? 0 : total / Double(months.count)
     }
 
-    func calculateMonthlyTotals() -> [(String, Double)] {
-
-        let grouped = Dictionary(grouping: transactions) { txn in
+    private func calculateMonthlyTotals() -> [(String,Double)] {
+        let grouped = Dictionary(grouping: vm.transactions) { txn in
             let date = parseDate(txn.date)
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM yyyy"
-            return formatter.string(from: date)
+            let f = DateFormatter(); f.dateFormat = "MMM yyyy"
+            return f.string(from: date)
         }
-
-        return grouped.map { (month, txns) in
-            let total = txns.map { $0.amount }.reduce(0, +)
-            return (month, total)
+        return grouped.map { month, txns in
+            (month, txns.map(\.amount).reduce(0, +))
         }
-        .sorted { (lhs, rhs) in
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM yyyy"
-            guard let lhsDate = formatter.date(from: lhs.0),
-                  let rhsDate = formatter.date(from: rhs.0) else {
-                return lhs.0 < rhs.0
-            }
-            return lhsDate < rhsDate
+        .sorted { lhs, rhs in
+            let f = DateFormatter(); f.dateFormat = "MMM yyyy"
+            return (f.date(from: lhs.0) ?? Date()) < (f.date(from: rhs.0) ?? Date())
         }
     }
 
-    func parseDate(_ dateString: String) -> Date {
-        let isoFormatter = ISO8601DateFormatter()
-        if let date = isoFormatter.date(from: dateString) {
-            return date
-        }
-
-        let fallback = DateFormatter()
-        fallback.dateFormat = "yyyy-MM-dd"
-        fallback.timeZone = TimeZone(abbreviation: "UTC")
-        if let date = fallback.date(from: dateString) {
-            return date
-        }
-
-        return Date()
+    private func parseDate(_ s: String) -> Date {
+        let iso = ISO8601DateFormatter()
+        if let d = iso.date(from: s) { return d }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .utc
+        return f.date(from: s) ?? Date()
     }
 }
 
-// MARK: - Currency Formatter
+// MARK: – Currency Formatter
+
 extension Double {
     func formattedCurrency() -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 2
-        formatter.usesGroupingSeparator = true
-        return formatter.string(from: NSNumber(value: self)) ?? "$0.00"
+        let fmt = NumberFormatter()
+        fmt.numberStyle = .currency
+        fmt.maximumFractionDigits = 2
+        fmt.minimumFractionDigits = 2
+        fmt.usesGroupingSeparator = true
+        return fmt.string(from: NSNumber(value: self)) ?? "$0.00"
     }
 }

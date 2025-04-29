@@ -1,189 +1,115 @@
 import SwiftUI
 import Charts
-import FirebaseAuth
-import FirebaseFirestore
-
-struct CategorySpending: Identifiable, Equatable { // <-- Added Equatable
-    let id = UUID()
-    let category: String
-    let amount: Double
-}
 
 struct InsightsView: View {
-    @State private var selectedMonth = Date()
-    @State private var allTransactions: [PlaidTransaction] = []
-    @State private var monthTransactions: [PlaidTransaction] = []
-    @State private var spendingData: [CategorySpending] = []
-    @State private var isLoading = true
-
-    var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Spending Breakdown")
-                        .font(.largeTitle.bold())
-
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Text("Select Month")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            DatePicker("", selection: $selectedMonth, displayedComponents: [.date])
-                                .labelsHidden()
-                                .onChange(of: selectedMonth) {
-                                    filterTransactionsByMonth()
-                                }
-                        }
-                        .padding(.horizontal)
-
-                        if isLoading {
-                            ProgressView()
-                                .frame(maxWidth: .infinity, alignment: .center)
-                        } else if spendingData.isEmpty {
-                            VStack(spacing: 12) {
-                                Image(systemName: "wallet.pass")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 50, height: 50)
-                                    .foregroundColor(.gray)
-                                Text("No spending data for this month.")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding()
-                        } else {
-                            Chart(spendingData.sorted { $0.amount > $1.amount }) { item in
-                                SectorMark(
-                                    angle: .value("Amount", item.amount),
-                                    innerRadius: .ratio(0.5),
-                                    angularInset: 2
-                                )
-                                .foregroundStyle(colorForCategory(item.category))
-                            }
-                            .frame(height: 250)
-                            .chartLegend(.hidden)
-                            .animation(.easeInOut(duration: 0.5), value: spendingData)
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(spendingData.sorted { $0.amount > $1.amount }) { item in
-                                HStack {
-                                    Circle()
-                                        .fill(colorForCategory(item.category))
-                                        .frame(width: 8, height: 8)
-                                    Text(item.category)
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Text(item.amount.formattedCurrency())
-                                        .font(.subheadline.bold())
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                    .padding()
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(16)
-                }
-                .padding()
-            }
-            .navigationTitle("Insights")
-            .onAppear {
-                fetchTransactions()
-            }
-        }
+  @StateObject private var vm = BankAccountsViewModel()
+  
+  // 1. Category filter
+  @State private var selectedCategory: String = "All"
+  private var categories: [String] {
+    let cats = vm.transactions.map { $0.category }
+    return ["All"] + Array(Set(cats)).sorted()
+  }
+  
+  // 2. Date range
+  @State private var startDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date())!
+  @State private var endDate: Date = Date()
+  
+  // 3. Accounts selector
+  @State private var selectedAccountIds: Set<String> = []
+  private var accountOptions: [BankAccount] { vm.accounts }
+  
+  // Filtered data
+  private var filteredTxns: [PlaidTransaction] {
+    vm.transactions.filter { txn in
+      // category
+      (selectedCategory == "All" || txn.category == selectedCategory)
+      // date
+      && txn.date >= startDate && txn.date <= endDate
+      // account
+      && (selectedAccountIds.isEmpty || selectedAccountIds.contains(txn.accountId))
     }
-
-    private func fetchTransactions() {
-        guard let userId = Auth.auth().currentUser?.uid else { return }
-
-        let db = Firestore.firestore()
-        db.collection("users").document(userId).collection("bank_accounts").getDocuments { snapshot, error in
-            if let error = error {
-                print("❌ Firestore error:", error)
-                self.isLoading = false
-                return
-            }
-
-            let tokens = snapshot?.documents.compactMap { $0.data()["access_token"] as? String } ?? []
-            for token in tokens {
-                fetchTransactionsFromBackend(token)
-            }
-        }
-    }
-
-    private func fetchTransactionsFromBackend(_ accessToken: String) {
-        guard let url = URL(string: "\(Constants.serverBaseURL)/api/transactions") else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: String] = ["access_token": accessToken]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            DispatchQueue.main.async {
-                if let data = data {
-                    do {
-                        let decoded = try JSONDecoder().decode([PlaidTransaction].self, from: data)
-                        self.allTransactions.append(contentsOf: decoded)
-                        self.filterTransactionsByMonth()
-                    } catch {
-                        print("❌ Decoding error:", error)
-                    }
+  }
+  
+  var body: some View {
+    ScrollView {
+      VStack(spacing: 16) {
+        // — Filters
+        VStack(spacing: 8) {
+          // Category
+          Picker("Category", selection: $selectedCategory) {
+            ForEach(categories, id: \.self) { Text($0).tag($0) }
+          }
+          .pickerStyle(.menu)
+          
+          // Date pickers
+          HStack {
+            DatePicker("From", selection: $startDate, in: ...endDate, displayedComponents: .date)
+            DatePicker("To",   selection: $endDate,   in: startDate..., displayedComponents: .date)
+          }
+          
+          // Accounts multi-select
+          Menu {
+            ForEach(accountOptions) { acct in
+              Button {
+                if selectedAccountIds.contains(acct.id) {
+                  selectedAccountIds.remove(acct.id)
                 } else {
-                    print("❌ Network error or no data")
+                  selectedAccountIds.insert(acct.id)
                 }
-                self.isLoading = false
+              } label: {
+                HStack {
+                  Text(acct.name)
+                  if selectedAccountIds.contains(acct.id) {
+                    Image(systemName: "checkmark")
+                  }
+                }
+              }
             }
-        }.resume()
-    }
-
-    private func filterTransactionsByMonth() {
-        let calendar = Calendar.current
-        let selectedComponents = calendar.dateComponents([.year, .month], from: selectedMonth)
-
-        monthTransactions = allTransactions.filter { txn in
-            let txnDate = parseDate(txn.date)
-            let txnComponents = calendar.dateComponents([.year, .month], from: txnDate)
-            return txnComponents.year == selectedComponents.year && txnComponents.month == selectedComponents.month
+          } label: {
+            HStack {
+              Text("Accounts")
+              Spacer()
+              Text(selectedAccountIds.isEmpty ? "All" : "\(selectedAccountIds.count) selected")
+                .foregroundColor(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+          }
         }
-
-        spendingData = calculateSpendingData(from: monthTransactions)
-    }
-
-    private func calculateSpendingData(from transactions: [PlaidTransaction]) -> [CategorySpending] {
-        let grouped = Dictionary(grouping: transactions, by: { $0.category?.first ?? "Other" })
-        return grouped.map { (category, txns) in
-            CategorySpending(category: category, amount: txns.map { $0.amount }.reduce(0, +))
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
+        .shadow(radius: 1)
+        
+        // — Chart / Empty state
+        if filteredTxns.isEmpty {
+          VStack(spacing: 8) {
+            Image(systemName: "chart.bar.xaxis")
+              .font(.largeTitle).opacity(0.3)
+            Text("No data for your selection")
+              .foregroundColor(.secondary)
+          }
+          .padding(.top, 50)
+        } else {
+          // Example: total spent by category pie chart
+          Chart {
+            ForEach( Dictionary(grouping: filteredTxns, by: \.category).map { ($0.key, $0.value.map(\.amount).reduce(0,+)) }, id: \.0 ) { category, sum in
+              SectorMark(
+                angle: .value("Amount", sum),
+                innerRadius: .ratio(0.5),
+                angularInset: 1
+              )
+              .foregroundStyle(by: .value("Category", category))
+            }
+          }
+          .frame(height: 250)
+          .padding()
         }
+      }
+      .padding()
     }
-
-    private func parseDate(_ dateString: String) -> Date {
-        let isoFormatter = ISO8601DateFormatter()
-        if let date = isoFormatter.date(from: dateString) {
-            return date
-        }
-
-        let fallback = DateFormatter()
-        fallback.dateFormat = "yyyy-MM-dd"
-        fallback.timeZone = TimeZone(abbreviation: "UTC")
-        return fallback.date(from: dateString) ?? Date()
-    }
-
-    private func colorForCategory(_ category: String) -> Color {
-        switch category.lowercased() {
-        case "food and drink": return .blue
-        case "travel": return .purple
-        case "transfer": return .orange
-        case "recreation": return .pink
-        case "payment": return .red
-        case "shops": return .green
-        default: return .gray
-        }
-    }
+    .navigationTitle("Insights")
+    .onAppear { vm.fetchAllTransactions() }
+  }
 }
-
