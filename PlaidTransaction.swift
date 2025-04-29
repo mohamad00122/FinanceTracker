@@ -1,8 +1,8 @@
 import Foundation
 
 struct PlaidTransaction: Identifiable, Codable {
-    var id: String = ""       // Will be set to the Firestore documentID
-    var accountId: String = ""// Will be set to the parent account’s ID
+    var id: String = ""        // Will be set to the docID
+    var accountId: String = "" // Ditto
 
     let name: String
     let amount: Double

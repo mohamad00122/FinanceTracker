@@ -1,12 +1,13 @@
 import SwiftUI
 import FirebaseAuth
+import FirebaseFirestore
 
 struct ContentView: View {
     @EnvironmentObject var vm: BankAccountsViewModel
     @State private var linkToken = ""
     @State private var isLinkPresented = false
-    @State private var errorMessage: String?
     @State private var showingError = false
+    @State private var errorMessage: String?
     @State private var showAllTransactions = false
     @State private var searchText = ""
 
@@ -33,18 +34,18 @@ struct ContentView: View {
                     linkToken: linkToken,
                     onSuccess: { publicToken in
                         exchangePublicToken(publicToken) {
-                            vm.fetchAccounts()
-                            vm.fetchAllTransactions()
                             isLinkPresented = false
                         }
                     },
-                    onExit: { _ in isLinkPresented = false }
+                    onExit: { _ in
+                        isLinkPresented = false
+                    }
                 )
             }
             .alert(isPresented: $showingError) {
                 Alert(
                     title: Text("Error"),
-                    message: Text(errorMessage ?? ""),
+                    message: Text(errorMessage ?? "Unknown error"),
                     dismissButton: .default(Text("OK")) {
                         errorMessage = nil
                     }
@@ -53,35 +54,52 @@ struct ContentView: View {
         }
     }
 
+    // MARK: – No Bank Account
+
     private var noBankConnectedView: some View {
         VStack(spacing: 16) {
-            Text("No Bank Account Connected").font(.headline)
+            Text("No Bank Account Connected")
+                .font(.headline)
             Text("Connect your bank account to view your spending data.")
-                .font(.subheadline).multilineTextAlignment(.center).padding(.horizontal)
-            Button("Connect Bank Account") { fetchLinkToken() }
-                .font(.headline).padding().frame(maxWidth: .infinity)
-                .background(Color.blue).foregroundColor(.white).cornerRadius(10)
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            Button("Connect Bank Account") {
+                fetchLinkToken()
+            }
+            .font(.headline)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.blue)
+            .foregroundColor(.white)
+            .cornerRadius(10)
         }
-        .padding().background(.ultraThinMaterial).cornerRadius(20)
-        .padding(.horizontal).shadow(radius: 10).padding(.top)
+        .padding()
+        .background(.ultraThinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal)
+        .shadow(radius: 10)
+        .padding(.top)
     }
+
+    // MARK: – Dashboard
 
     private var dashboardView: some View {
         VStack(spacing: 16) {
-            Text("Finance Tracker").font(.largeTitle).bold()
+            Text("Finance Tracker")
+                .font(.largeTitle).bold()
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // comparison cards
             SpendingComparisonView(
                 currentFormatted: calculateThisMonth().formattedCurrency(),
                 averageFormatted: calculateAvg().formattedCurrency()
             )
 
-            // line + rule chart
             SpendingChartView(
                 monthlyTotals: calculateMonthlyTotals(),
                 average: calculateAvg()
-            ).frame(height: 220)
+            )
+            .frame(height: 220)
 
             Text("Plaid Status: Connected")
                 .font(.footnote).foregroundColor(.gray)
@@ -89,16 +107,22 @@ struct ContentView: View {
 
             transactionsView
         }
-        .padding().background(.ultraThinMaterial).cornerRadius(20)
-        .padding(.horizontal).shadow(radius: 8)
+        .padding()
+        .background(.ultraThinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal)
+        .shadow(radius: 8)
     }
 
     private var transactionsView: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Recent Transactions").font(.title2).bold()
+                Text("Recent Transactions")
+                    .font(.title2).bold()
                 Spacer()
-                Button { withAnimation { showAllTransactions.toggle() } } label: {
+                Button {
+                    withAnimation { showAllTransactions.toggle() }
+                } label: {
                     Image(systemName: showAllTransactions ? "chevron.up" : "chevron.down")
                         .foregroundColor(.blue)
                 }
@@ -112,7 +136,8 @@ struct ContentView: View {
 
             ForEach(filteredTransactions.prefix(showAllTransactions ? 100 : 3)) { txn in
                 TransactionRowView(transaction: txn)
-                    .padding().background(Color(UIColor.secondarySystemBackground))
+                    .padding()
+                    .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(16)
                     .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
             }
@@ -120,45 +145,92 @@ struct ContentView: View {
     }
 
     private var filteredTransactions: [PlaidTransaction] {
+        let all = vm.transactions
+        guard !all.isEmpty else { return [] }
         if searchText.isEmpty {
-            return vm.transactions
-        } else {
-            return vm.transactions.filter {
-                $0.name.localizedCaseInsensitiveContains(searchText)
-                || ($0.category?.joined(separator: ", ").localizedCaseInsensitiveContains(searchText) ?? false)
-            }
+            return all
+        }
+        return all.filter {
+            $0.name.localizedCaseInsensitiveContains(searchText)
+            || ($0.category?.joined(separator: ", ").localizedCaseInsensitiveContains(searchText) ?? false)
         }
     }
 
-    // MARK: – Plaid Link & Token Exchange
+    // MARK: – Plaid Link
 
     private func fetchLinkToken() {
-        guard let url = URL(string: "\(Constants.serverBaseURL)/api/create_link_token") else { return }
-        var req = URLRequest(url: url); req.httpMethod = "POST"
+        guard let url = URL(string: "\(Constants.serverBaseURL)/api/create_link_token")
+        else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
         URLSession.shared.dataTask(with: req) { data, _, _ in
-            if let data = data,
-               let res = try? JSONDecoder().decode([String:String].self, from: data),
-               let token = res["link_token"] {
-                DispatchQueue.main.async {
-                    self.linkToken = token
-                    self.isLinkPresented = true
-                }
+            guard
+                let data = data,
+                let res = try? JSONDecoder().decode([String:String].self, from: data),
+                let token = res["link_token"]
+            else { return }
+            DispatchQueue.main.async {
+                linkToken = token
+                isLinkPresented = true
             }
-        }.resume()
+        }
+        .resume()
     }
 
-    private func exchangePublicToken(_ publicToken: String, completion: @escaping ()->Void) {
-        guard let url = URL(string: "\(Constants.serverBaseURL)/api/exchange_public_token"),
-              let userId = Auth.auth().currentUser?.uid else { return }
-        var req = URLRequest(url: url); req.httpMethod = "POST"
+    private func exchangePublicToken(
+        _ publicToken: String,
+        completion: @escaping ()->Void
+    ) {
+        guard
+            let url = URL(string: "\(Constants.serverBaseURL)/api/exchange_public_token"),
+            let userId = Auth.auth().currentUser?.uid
+        else {
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "public_token": publicToken,
-            "user_id": userId
-        ])
+        req.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["public_token": publicToken, "user_id": userId]
+        )
+
         URLSession.shared.dataTask(with: req) { data, _, _ in
-            completion()
-        }.resume()
+            guard
+                let data = data,
+                let res = try? JSONDecoder().decode([String:String].self, from: data),
+                let token = res["access_token"]
+            else {
+                DispatchQueue.main.async {
+                    errorMessage = "Token exchange failed"
+                    showingError = true
+                }
+                return
+            }
+
+            // Persist to Firestore under `access_token`
+            let db = Firestore.firestore()
+            let acctRef = db
+                .collection("users").document(userId)
+                .collection("bank_accounts").document("primary")
+            acctRef.setData([
+                "access_token": token,
+                "linkedAt": Timestamp(date: Date())
+            ]) { err in
+                DispatchQueue.main.async {
+                    if let err = err {
+                        errorMessage = err.localizedDescription
+                        showingError = true
+                    } else {
+                        // Reload both accounts and transactions
+                        vm.fetchAccounts()
+                        vm.fetchAllTransactions()
+                    }
+                    completion()
+                }
+            }
+        }
+        .resume()
     }
 
     // MARK: – Calculations
@@ -178,7 +250,7 @@ struct ContentView: View {
         return months.isEmpty ? 0 : total / Double(months.count)
     }
 
-    private func calculateMonthlyTotals() -> [(String,Double)] {
+    private func calculateMonthlyTotals() -> [(String, Double)] {
         let grouped = Dictionary(grouping: vm.transactions) { txn in
             let date = parseDate(txn.date)
             let f = DateFormatter(); f.dateFormat = "MMM yyyy"
@@ -195,12 +267,9 @@ struct ContentView: View {
 
     private func parseDate(_ s: String) -> Date {
         let iso = ISO8601DateFormatter()
-        if let d = iso.date(from: s) {
-            return d
-        }
+        if let d = iso.date(from: s) { return d }
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        // Use GMT+0 as your UTC equivalent:
         f.timeZone = TimeZone(secondsFromGMT: 0)
         return f.date(from: s) ?? Date()
     }

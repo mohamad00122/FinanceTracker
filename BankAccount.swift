@@ -1,8 +1,16 @@
 import Foundation
 
-struct BankAccount: Identifiable, Codable {
-    var id: String            // Firestore document ID
-    var accessToken: String
+struct BankAccount: Identifiable, Decodable {
+    var id: String            // will be set to the Firestore documentID
+    let accessToken: String   // from the “access_token” field
 
-    // (Add other fields here if you’ve stored more under each bank_accounts doc)
+    private enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.accessToken = try container.decode(String.self, forKey: .accessToken)
+        self.id = ""         // placeholder; view model will overwrite with docID
+    }
 }
