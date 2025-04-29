@@ -95,9 +95,11 @@ struct ContentView: View {
             )
 
             SpendingChartView(
-                monthlyTotals: calculateMonthlyTotals()
+              monthlyTotals: calculateMonthlyTotals(),
+              average:           calculateAvg()
             )
             .frame(height: 220)
+
 
             Text("Plaid Status: Connected")
                 .font(.footnote)
