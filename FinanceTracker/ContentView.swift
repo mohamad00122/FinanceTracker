@@ -195,8 +195,13 @@ struct ContentView: View {
 
     private func parseDate(_ s: String) -> Date {
         let iso = ISO8601DateFormatter()
-        if let d = iso.date(from: s) { return d }
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .utc
+        if let d = iso.date(from: s) {
+            return d
+        }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        // Use GMT+0 as your UTC equivalent:
+        f.timeZone = TimeZone(secondsFromGMT: 0)
         return f.date(from: s) ?? Date()
     }
 }
