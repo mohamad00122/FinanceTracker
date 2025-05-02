@@ -4,108 +4,75 @@ import FirebaseFirestore
 
 class BankAccountsViewModel: ObservableObject {
     @Published var accounts: [BankAccount] = []
-    @Published var transactions: [PlaidTransaction] = []
+    @Published var transactions: [String: [PlaidTransaction]] = [:]
     @Published var errorMessage: String?
 
     private let db = Firestore.firestore()
+    private var uid: String? { Auth.auth().currentUser?.uid }
 
     init() {
-        fetchAccounts()
-        fetchAllTransactions()
+        listenForAccounts()
     }
 
-    /// Load all linked accounts under users/{uid}/bank_accounts
-    func fetchAccounts() {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            errorMessage = "Not signed in"
+    func listenForAccounts() {
+        guard let uid = uid else {
+            print("❌ No user ID found.")
             return
         }
-        let ref = db
-            .collection("users").document(uid)
+
+        db.collection("users").document(uid)
             .collection("bank_accounts")
+            .addSnapshotListener { snap, err in
+                if let err = err {
+                    print("❌ Accounts listener error:", err)
+                    self.errorMessage = err.localizedDescription
+                    return
+                }
 
-        ref.getDocuments { snapshot, err in
-            if let err = err {
-                DispatchQueue.main.async { self.errorMessage = err.localizedDescription }
-                return
-            }
-            let docs = snapshot?.documents ?? []
-            var loaded: [BankAccount] = []
-
-            for doc in docs {
-                let data = doc.data()
-                do {
-                    let json = try JSONSerialization.data(withJSONObject: data)
-                    var acct = try JSONDecoder().decode(BankAccount.self, from: json)
-                    acct.id = doc.documentID
-                    loaded.append(acct)
-                } catch {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "Account decode error: \(error.localizedDescription)"
+                let docs = snap?.documents ?? []
+                let loaded: [BankAccount] = docs.compactMap { doc in
+                    let data = doc.data()
+                    guard let token = data["access_token"] as? String else {
+                        print("❌ Missing access_token in doc \(doc.documentID)")
+                        return nil
                     }
+                    return BankAccount(id: doc.documentID, accessToken: token)
+                }
+
+                print("🔍 accounts snapshot count:", loaded.count)
+                DispatchQueue.main.async {
+                    self.accounts = loaded
+                    self.fetchAllTransactions()
                 }
             }
-
-            DispatchQueue.main.async {
-                self.accounts = loaded
-            }
-        }
     }
 
-    /// Fetch *all* transactions under each bank account
     func fetchAllTransactions() {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            errorMessage = "Not signed in"
+        guard let uid = uid else {
+            print("❌ No user ID found.")
             return
         }
-        let accountsRef = db
-            .collection("users").document(uid)
-            .collection("bank_accounts")
 
-        accountsRef.getDocuments { acctSnap, acctErr in
-            if let acctErr = acctErr {
-                DispatchQueue.main.async { self.errorMessage = acctErr.localizedDescription }
-                return
-            }
-            let acctDocs = acctSnap?.documents ?? []
-            var allTxns: [PlaidTransaction] = []
-            let group = DispatchGroup()
+        for acct in accounts {
+            let txRef = db.collection("users")
+                .document(uid)
+                .collection("bank_accounts")
+                .document(acct.id)
+                .collection("transactions")
 
-            for acctDoc in acctDocs {
-                let acctId = acctDoc.documentID
-                let txnsRef = accountsRef
-                    .document(acctId)
-                    .collection("transactions")
-
-                group.enter()
-                txnsRef.getDocuments { txnSnap, txnErr in
-                    defer { group.leave() }
-                    if let txnErr = txnErr {
-                        DispatchQueue.main.async {
-                            self.errorMessage = "Error loading txns for \(acctId): \(txnErr)"
-                        }
-                        return
-                    }
-                    for doc in txnSnap?.documents ?? [] {
-                        let data = doc.data()
-                        do {
-                            let json = try JSONSerialization.data(withJSONObject: data)
-                            var txn = try JSONDecoder().decode(PlaidTransaction.self, from: json)
-                            txn.id = doc.documentID
-                            txn.accountId = acctId
-                            allTxns.append(txn)
-                        } catch {
-                            DispatchQueue.main.async {
-                                self.errorMessage = "Transaction decode error: \(error)"
-                            }
-                        }
-                    }
+            txRef.getDocuments { snap, err in
+                if let err = err {
+                    print("❌ Fetch txns error for \(acct.id):", err)
+                    self.errorMessage = err.localizedDescription
+                    return
                 }
-            }
 
-            group.notify(queue: .main) {
-                // sort newest first
-                self.transactions = allTxns.sorted { $0.date > $1.date }
+                let txCount = snap?.documents.count ?? 0
+                print("📄 txs for", acct.id, ":", txCount)
+
+                self.transactions[acct.id] = snap?.documents.compactMap {
+                    try? $0.data(as: PlaidTransaction.self)
+                } ?? []
             }
         }
     }

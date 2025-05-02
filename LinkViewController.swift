@@ -10,7 +10,7 @@ class LinkViewController: UIViewController {
     }
 
     func fetchLinkToken() {
-        let linkToken = "link-sandbox-f5b8c8f9-60a0-4a61-87db-3c5205f95e66" // Replace this every time you generate a new one
+        let linkToken = "link-sandbox-269ea1ed-fd53-4555-8400-1cfd7145ceec" // Replace this every time you generate a new one
 
         let configuration = LinkTokenConfiguration(token: linkToken) { success in
             print("Successfully linked account: \(success)")

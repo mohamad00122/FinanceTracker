@@ -2,39 +2,41 @@ import SwiftUI
 import Charts
 
 struct InsightsView: View {
-    // Use the shared VM injected at the App level
     @EnvironmentObject var vm: BankAccountsViewModel
 
-    // 1. Category filter
+    // 1) Category filter
     @State private var selectedCategory = "All"
     private var categories: [String] {
-        // flatten all category arrays into one [String]
-        let cats = vm.transactions
-            .compactMap { $0.category }
-            .flatMap { $0 }
-        return ["All"] + Array(Set(cats)).sorted()
+        // flatten all transactions to one array
+        let allTxns = vm.transactions.values.flatMap { $0 }
+        // pull out every category array, then flatten
+        let cats = allTxns
+            .compactMap { $0.category }    // [String]?
+            .flatMap { $0 }                // [String]
+        let unique = Array(Set(cats)).sorted()
+        return ["All"] + unique
     }
 
-    // 2. Date range
+    // 2) Date range
     @State private var startDate = Calendar.current.date(
         byAdding: .month, value: -1, to: Date()
     )!
     @State private var endDate = Date()
 
-    // 3. Accounts selector
+    // 3) Account selector
     @State private var selectedAccountIds: Set<String> = []
     private var accountOptions: [BankAccount] { vm.accounts }
 
-    // MARK: – Filtered transactions
+    // ─── Filtered transactions ───
     private var filteredTxns: [PlaidTransaction] {
-        vm.transactions.filter { txn in
+        // flatten dictionary into one array
+        let allTxns = vm.transactions.values.flatMap { $0 }
+        return allTxns.filter { txn in
             let txnDate = parseDate(txn.date)
-            let matchesCategory =
-                (selectedCategory == "All")
+            let matchesCategory = (selectedCategory == "All")
                 || (txn.category?.contains(selectedCategory) ?? false)
-            let matchesDate = txnDate >= startDate && txnDate <= endDate
-            let matchesAccount =
-                selectedAccountIds.isEmpty
+            let matchesDate = (txnDate >= startDate && txnDate <= endDate)
+            let matchesAccount = selectedAccountIds.isEmpty
                 || selectedAccountIds.contains(txn.accountId)
             return matchesCategory && matchesDate && matchesAccount
         }
@@ -70,7 +72,7 @@ struct InsightsView: View {
                                 }
                             } label: {
                                 HStack {
-                                    Text(acct.id) // or acct.someName
+                                    Text(acct.id) // or acct.institutionName
                                     if selectedAccountIds.contains(acct.id) {
                                         Image(systemName: "checkmark")
                                     }
@@ -88,13 +90,17 @@ struct InsightsView: View {
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color(.secondarySystemBackground)))
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.secondarySystemBackground))
+                        )
                     }
                 }
                 .padding()
-                .background(RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(.systemBackground)))
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.systemBackground))
+                )
                 .shadow(radius: 1)
 
                 // ───── Chart or Empty State ─────
@@ -109,14 +115,15 @@ struct InsightsView: View {
                     .padding(.top, 50)
 
                 } else {
-                    // Group by first category (or "Uncategorized")
+                    // Group by first category, or "Uncategorized"
                     let grouped = Dictionary(
-                        grouping: filteredTxns
-                    ) { txn in txn.category?.first ?? "Uncategorized" }
+                        grouping: filteredTxns,
+                        by: { $0.category?.first ?? "Uncategorized" }
+                    )
 
-                    // Map to (category, sum)
-                    let data = grouped.map { (key, vals) in
-                        (key, vals.map(\.amount).reduce(0, +))
+                    // Convert to (category, totalAmount)
+                    let data = grouped.map { (category, txns) in
+                        (category, txns.map(\.amount).reduce(0, +))
                     }
 
                     Chart {
@@ -136,10 +143,9 @@ struct InsightsView: View {
             .padding()
         }
         .navigationTitle("Insights")
-        .onAppear { vm.fetchAllTransactions() }
     }
 
-    // Reuse your ContentView date parser here
+    // MARK: – Date parser
     private func parseDate(_ s: String) -> Date {
         let iso = ISO8601DateFormatter()
         if let d = iso.date(from: s) { return d }

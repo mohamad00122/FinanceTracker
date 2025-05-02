@@ -1,10 +1,19 @@
 import SwiftUI
 import FirebaseAuth
-import FirebaseFirestore
+
+// MARK: – Decode structs for your API
+struct LinkTokenResponse: Decodable {
+    let link_token: String
+}
+
+struct ExchangeResponse: Decodable {
+    let item_id: String
+    let access_token: String
+    let transactionCount: Int
+}
 
 struct SettingsView: View {
     @EnvironmentObject private var viewModel: BankAccountsViewModel
-    @AppStorage("accessToken") private var accessToken: String = ""
     @State private var linkToken = ""
     @State private var isLinkPresented = false
     @State private var errorMessage = ""
@@ -14,11 +23,12 @@ struct SettingsView: View {
             List {
                 // — User info
                 Section {
-                    HStack(spacing:12) {
-                        Image(systemName:"person.circle.fill")
-                            .resizable().frame(width:48,height:48)
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.circle.fill")
+                            .resizable()
+                            .frame(width: 48, height: 48)
                             .foregroundColor(.blue)
-                        VStack(alignment:.leading) {
+                        VStack(alignment: .leading) {
                             Text(Auth.auth().currentUser?.email ?? "Unknown User")
                                 .font(.headline)
                             Text("Manage your account")
@@ -26,48 +36,53 @@ struct SettingsView: View {
                                 .foregroundColor(.gray)
                         }
                     }
-                    .padding(.vertical,8)
+                    .padding(.vertical, 8)
                 }
 
                 // — Bank Connection
                 Section(header: Text("BANK CONNECTION")) {
                     if viewModel.accounts.isEmpty {
-                        Button("Connect Bank Account") { fetchLinkToken() }
+                        Button("Connect Bank Account") {
+                            fetchLinkToken()
+                        }
                     } else {
-                        Label("Bank Account Connected", systemImage:"checkmark.circle.fill")
+                        Label("Bank Account Connected", systemImage: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Button("Connect Another Bank") { fetchLinkToken() }
+                        Button("Connect Another Bank") {
+                            fetchLinkToken()
+                        }
                     }
                 }
 
                 // — Log out
                 Section {
-                    Button(role:.destructive, action: logout) {
-                        Label("Log Out", systemImage:"arrowshape.turn.up.left")
+                    Button(role: .destructive) {
+                        logout()
+                    } label: {
+                        Label("Log Out", systemImage: "arrowshape.turn.up.left")
                     }
                 }
 
                 // — Errors
                 if !errorMessage.isEmpty {
                     Section {
-                        Text(errorMessage).foregroundColor(.red)
+                        Text(errorMessage)
+                            .foregroundColor(.red)
                     }
                 }
             }
             .listStyle(InsetGroupedListStyle())
             .navigationTitle("Settings")
-            .onAppear { viewModel.fetchAccounts() }
             .sheet(isPresented: $isLinkPresented) {
                 PlaidLinkView(
                     linkToken: linkToken,
                     onSuccess: { publicToken in
-                        exchangePublicToken(publicToken) { token in
-                            if let token = token {
-                                self.accessToken = token
-                            }
-                        }
+                        print("✅ Got public token:", publicToken)
+                        exchangePublicToken(publicToken)
                     },
-                    onExit: { _ in isLinkPresented = false }
+                    onExit: { _ in
+                        isLinkPresented = false
+                    }
                 )
             }
         }
@@ -76,77 +91,81 @@ struct SettingsView: View {
     // MARK: – Actions
 
     private func logout() {
-        do { try Auth.auth().signOut() }
-        catch { errorMessage = error.localizedDescription }
+        do {
+            try Auth.auth().signOut()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func fetchLinkToken() {
-        guard let url = URL(string: "\(Constants.serverBaseURL)/api/create_link_token")
-        else { return }
-        var req = URLRequest(url:url); req.httpMethod = "POST"
-        URLSession.shared.dataTask(with:req) { data,_,_ in
+        guard let url = URL(string: "\(Constants.serverBaseURL)/api/create_link_token") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            if let err = err {
+                print("❌ Link token fetch error:", err)
+                return
+            }
             guard
-              let data = data,
-              let res = try? JSONDecoder().decode([String:String].self, from:data),
-              let token = res["link_token"]
+                let data = data,
+                let resp = try? JSONDecoder().decode(LinkTokenResponse.self, from: data)
             else { return }
+
             DispatchQueue.main.async {
-                linkToken = token
+                linkToken = resp.link_token
                 isLinkPresented = true
             }
         }.resume()
     }
 
-    private func exchangePublicToken(
-        _ publicToken: String,
-        completion: @escaping (String?)->Void
-    ) {
+    private func exchangePublicToken(_ publicToken: String) {
         guard
-          let url = URL(string: "\(Constants.serverBaseURL)/api/exchange_public_token"),
-          let userId = Auth.auth().currentUser?.uid
+            let url = URL(string: "\(Constants.serverBaseURL)/api/exchange_public_token"),
+            let userId = Auth.auth().currentUser?.uid
         else {
-            completion(nil); return
+            return
         }
 
-        var req = URLRequest(url:url); req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField:"Content-Type")
-        req.httpBody = try? JSONSerialization.data(
-          withJSONObject: ["public_token":publicToken, "user_id":userId]
-        )
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "public_token": publicToken,
+            "userId": userId
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with:req) { data,_,_ in
-            guard
-              let data = data,
-              let res = try? JSONDecoder().decode([String:String].self, from:data),
-              let token = res["access_token"]
-            else {
-                completion(nil)
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            if let err = err {
+                print("❌ Exchange request error:", err)
+                DispatchQueue.main.async {
+                    errorMessage = err.localizedDescription
+                    isLinkPresented = false
+                }
                 return
             }
-
-            // Persist the account under snake_case key
-            let db = Firestore.firestore()
-            let acctRef = db
-              .collection("users").document(userId)
-              .collection("bank_accounts").document("primary")
-
-            acctRef.setData([
-              "access_token": token,
-              "linkedAt": Timestamp(date: Date())
-            ]) { err in
+            guard let data = data else {
                 DispatchQueue.main.async {
-                    if let err = err {
-                        errorMessage = err.localizedDescription
-                    } else {
-                        // reload both accounts & transactions
-                        viewModel.fetchAccounts()
-                        viewModel.fetchAllTransactions()
-                    }
+                    errorMessage = "No data from exchange"
+                    isLinkPresented = false
+                }
+                return
+            }
+            do {
+                let exchange = try JSONDecoder().decode(ExchangeResponse.self, from: data)
+                print("✅ Exchange success:", exchange)
+                DispatchQueue.main.async {
+                    isLinkPresented = false
+                }
+            } catch {
+                print("❌ Exchange decode error:", error)
+                DispatchQueue.main.async {
+                    errorMessage = error.localizedDescription
                     isLinkPresented = false
                 }
             }
-
-            completion(token)
         }.resume()
     }
 }
