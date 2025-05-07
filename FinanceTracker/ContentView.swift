@@ -11,7 +11,6 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var animateFloat = false
 
-    // MARK: – Flattened transactions array
     private var allTransactions: [PlaidTransaction] {
         vm.transactions.values.flatMap { $0 }
     }
@@ -30,6 +29,10 @@ struct ContentView: View {
                 .padding(.vertical)
             }
             .navigationTitle("Dashboard")
+            .refreshable {
+                await vm.fetchAccounts()
+                await vm.fetchAllTransactions()
+            }
             .sheet(isPresented: $isLinkPresented) {
                 PlaidLinkView(
                     linkToken: linkToken,
@@ -55,7 +58,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: – No Bank Account View
     private var noBankConnectedView: some View {
         VStack(spacing: 16) {
             Text("No Bank Account Connected")
@@ -85,12 +87,16 @@ struct ContentView: View {
         .padding(.top)
     }
 
-    // MARK: – Dashboard View
     private var dashboardView: some View {
         VStack(spacing: 16) {
-            Text("Finance Tracker")
-                .font(.largeTitle).bold()
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.fill")
+                    .foregroundColor(.blue)
+                    .font(.title2)
+                Text("Spendr")
+                    .font(.largeTitle).bold()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             SpendingComparisonView(
                 currentFormatted: calculateThisMonth().formattedCurrency(),
@@ -103,8 +109,9 @@ struct ContentView: View {
             )
             .frame(height: 220)
 
-            Text("Plaid Status: Connected")
-                .font(.footnote).foregroundColor(.gray)
+            Label("Plaid Connected", systemImage: "checkmark.shield.fill")
+                .font(.footnote)
+                .foregroundColor(.green)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             transactionsView
@@ -116,7 +123,6 @@ struct ContentView: View {
         .shadow(radius: 8)
     }
 
-    // MARK: – Transactions List
     private var transactionsView: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -172,7 +178,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: – Filtered Transactions
     private var filteredTransactions: [PlaidTransaction] {
         let all = allTransactions
         guard !all.isEmpty else { return [] }
@@ -183,7 +188,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: – Plaid Link Helpers
     private func fetchLinkToken() {
         guard let url = URL(string: "\(Constants.serverBaseURL)/api/create_link_token") else { return }
         var req = URLRequest(url: url)
@@ -253,13 +257,10 @@ struct ContentView: View {
         }.resume()
     }
 
-    // MARK: – Calculations
-
     private func calculateThisMonth() -> Double {
         let currentMonth = Calendar.current.component(.month, from: Date())
         return allTransactions
-            .filter { Calendar.current.component(.month,
-                         from: parseDate($0.date)) == currentMonth }
+            .filter { Calendar.current.component(.month, from: parseDate($0.date)) == currentMonth }
             .map(\.amount)
             .reduce(0, +)
     }
@@ -273,14 +274,11 @@ struct ContentView: View {
     }
 
     private func calculateMonthlyTotals() -> [(String, Double)] {
-        let grouped = Dictionary(
-            grouping: allTransactions,
-            by: { txn in
-                let date = parseDate(txn.date)
-                let fmt = DateFormatter(); fmt.dateFormat = "MMM yyyy"
-                return fmt.string(from: date)
-            }
-        )
+        let grouped = Dictionary(grouping: allTransactions, by: { txn in
+            let date = parseDate(txn.date)
+            let fmt = DateFormatter(); fmt.dateFormat = "MMM yyyy"
+            return fmt.string(from: date)
+        })
         return grouped.map { month, txns in
             (month, txns.map(\.amount).reduce(0, +))
         }
@@ -289,8 +287,6 @@ struct ContentView: View {
             return (fmt.date(from: lhs.0) ?? Date()) < (fmt.date(from: rhs.0) ?? Date())
         }
     }
-
-    // MARK: – Date Parser
 
     private func parseDate(_ s: String) -> Date {
         let iso = ISO8601DateFormatter()
@@ -301,8 +297,6 @@ struct ContentView: View {
         return f.date(from: s) ?? Date()
     }
 }
-
-// MARK: – Currency Formatter
 
 extension Double {
     func formattedCurrency() -> String {

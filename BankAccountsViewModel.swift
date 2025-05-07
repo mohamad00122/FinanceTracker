@@ -2,78 +2,84 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 
+@MainActor
 class BankAccountsViewModel: ObservableObject {
     @Published var accounts: [BankAccount] = []
     @Published var transactions: [String: [PlaidTransaction]] = [:]
     @Published var errorMessage: String?
 
     private let db = Firestore.firestore()
-    private var uid: String? { Auth.auth().currentUser?.uid }
+
+    private var uid: String? {
+        Auth.auth().currentUser?.uid
+    }
 
     init() {
-        listenForAccounts()
+        Task {
+            await fetchAccounts()
+        }
     }
 
-    func listenForAccounts() {
+    func fetchAccounts() async {
         guard let uid = uid else {
             print("❌ No user ID found.")
             return
         }
 
-        db.collection("users").document(uid)
-            .collection("bank_accounts")
-            .addSnapshotListener { snap, err in
-                if let err = err {
-                    print("❌ Accounts listener error:", err)
-                    self.errorMessage = err.localizedDescription
-                    return
-                }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("bank_accounts")
+                .getDocuments()
 
-                let docs = snap?.documents ?? []
-                let loaded: [BankAccount] = docs.compactMap { doc in
-                    let data = doc.data()
-                    guard let token = data["access_token"] as? String else {
-                        print("❌ Missing access_token in doc \(doc.documentID)")
-                        return nil
-                    }
-                    return BankAccount(id: doc.documentID, accessToken: token)
+            let loaded: [BankAccount] = snapshot.documents.compactMap { doc in
+                let data = doc.data()
+                guard let token = data["access_token"] as? String else {
+                    print("❌ Missing access_token in doc \(doc.documentID)")
+                    return nil
                 }
-
-                print("🔍 accounts snapshot count:", loaded.count)
-                DispatchQueue.main.async {
-                    self.accounts = loaded
-                    self.fetchAllTransactions()
-                }
+                return BankAccount(id: doc.documentID, accessToken: token)
             }
+
+            print("🔍 accounts snapshot count:", loaded.count)
+            self.accounts = loaded
+            await fetchAllTransactions()
+
+        } catch {
+            print("❌ Accounts fetch error:", error.localizedDescription)
+            self.errorMessage = error.localizedDescription
+        }
     }
 
-    func fetchAllTransactions() {
+    func fetchAllTransactions() async {
         guard let uid = uid else {
             print("❌ No user ID found.")
             return
         }
+
+        var updated: [String: [PlaidTransaction]] = [:]
 
         for acct in accounts {
-            let txRef = db.collection("users")
-                .document(uid)
-                .collection("bank_accounts")
-                .document(acct.id)
-                .collection("transactions")
+            do {
+                let snapshot = try await db.collection("users")
+                    .document(uid)
+                    .collection("bank_accounts")
+                    .document(acct.id)
+                    .collection("transactions")
+                    .getDocuments()
 
-            txRef.getDocuments { snap, err in
-                if let err = err {
-                    print("❌ Fetch txns error for \(acct.id):", err)
-                    self.errorMessage = err.localizedDescription
-                    return
+                let txns = snapshot.documents.compactMap {
+                    try? $0.data(as: PlaidTransaction.self)
                 }
 
-                let txCount = snap?.documents.count ?? 0
-                print("📄 txs for", acct.id, ":", txCount)
+                print("📄 txs for", acct.id, ":", txns.count)
+                updated[acct.id] = txns
 
-                self.transactions[acct.id] = snap?.documents.compactMap {
-                    try? $0.data(as: PlaidTransaction.self)
-                } ?? []
+            } catch {
+                print("❌ Fetch txns error for \(acct.id):", error)
+                self.errorMessage = error.localizedDescription
             }
         }
+
+        self.transactions = updated
     }
 }
