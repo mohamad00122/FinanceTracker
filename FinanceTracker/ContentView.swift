@@ -12,7 +12,7 @@ struct ContentView: View {
     @State private var animateFloat = false
 
     private var allTransactions: [PlaidTransaction] {
-        vm.transactions.values.flatMap { $0 }
+        vm.transactionsByAccount.values.flatMap { $0 }
     }
 
     var body: some View {

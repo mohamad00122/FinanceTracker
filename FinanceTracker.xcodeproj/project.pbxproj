@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5A6AAB4E2DDEFCDB00C3ADED /* DateRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6AAB4D2DDEFCD300C3ADED /* DateRange.swift */; };
 		5AC95E4E2DAF64A7000B34AE /* LinkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5AC95E4D2DAF64A7000B34AE /* LinkKit */; };
 		5AC95E522DAF6539000B34AE /* MockData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC95E512DAF6534000B34AE /* MockData.swift */; };
 		5AC95E552DAF6CF4000B34AE /* LinkViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AC95E542DAF6CF1000B34AE /* LinkViewController.swift */; };
@@ -50,6 +51,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		5A6AAB4D2DDEFCD300C3ADED /* DateRange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateRange.swift; sourceTree = "<group>"; };
 		5AC95E1E2DAF6267000B34AE /* FinanceTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FinanceTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5AC95E2F2DAF626C000B34AE /* FinanceTrackerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FinanceTrackerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5AC95E392DAF626C000B34AE /* FinanceTrackerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FinanceTrackerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -124,6 +126,7 @@
 		5AC95E152DAF6267000B34AE = {
 			isa = PBXGroup;
 			children = (
+				5A6AAB4D2DDEFCD300C3ADED /* DateRange.swift */,
 				5AD22EA12DBD54A900F28417 /* Constants.swift */,
 				5AD22E9F2DBA029300F28417 /* InsightsView.swift */,
 				5AD22E9D2DB9F42100F28417 /* TransactionRowView.swift */,
@@ -330,6 +333,7 @@
 				5AD22E702DB0CC4A00F28417 /* PlaidTransaction.swift in Sources */,
 				5AD22E832DB2178F00F28417 /* AuthenticationView.swift in Sources */,
 				5AD22E922DB357CF00F28417 /* SettingsView.swift in Sources */,
+				5A6AAB4E2DDEFCDB00C3ADED /* DateRange.swift in Sources */,
 				5AD22E902DB3579B00F28417 /* MainTabView.swift in Sources */,
 				5AD22E742DB212AE00F28417 /* SpendingComparisonView.swift in Sources */,
 				5AD22E9A2DB5E94E00F28417 /* BankAccountsViewModel.swift in Sources */,

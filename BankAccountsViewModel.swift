@@ -5,14 +5,11 @@ import FirebaseFirestore
 @MainActor
 class BankAccountsViewModel: ObservableObject {
     @Published var accounts: [BankAccount] = []
-    @Published var transactions: [String: [PlaidTransaction]] = [:]
+    @Published var transactionsByAccount: [String: [PlaidTransaction]] = [:]
     @Published var errorMessage: String?
 
     private let db = Firestore.firestore()
-
-    private var uid: String? {
-        Auth.auth().currentUser?.uid
-    }
+    private var uid: String? { Auth.auth().currentUser?.uid }
 
     init() {
         Task { await fetchAccounts() }
@@ -21,7 +18,8 @@ class BankAccountsViewModel: ObservableObject {
     func fetchAccounts() async {
         guard let uid = uid else { return }
         do {
-            let snapshot = try await db.collection("users").document(uid)
+            let snapshot = try await db
+                .collection("users").document(uid)
                 .collection("bank_accounts").getDocuments()
 
             let loaded: [BankAccount] = snapshot.documents.compactMap { doc in
@@ -43,11 +41,12 @@ class BankAccountsViewModel: ObservableObject {
 
         for acct in accounts {
             do {
-                let snapshot = try await db.collection("users").document(uid)
+                let snap = try await db
+                    .collection("users").document(uid)
                     .collection("bank_accounts").document(acct.id)
                     .collection("transactions").getDocuments()
 
-                let txns = snapshot.documents.compactMap {
+                let txns = snap.documents.compactMap {
                     try? $0.data(as: PlaidTransaction.self)
                 }
                 updated[acct.id] = txns
@@ -56,7 +55,7 @@ class BankAccountsViewModel: ObservableObject {
             }
         }
 
-        self.transactions = updated
+        self.transactionsByAccount = updated
     }
 
     // MARK: - Data Helpers
@@ -65,14 +64,14 @@ class BankAccountsViewModel: ObservableObject {
     func summarize(transactions: [PlaidTransaction]) -> [(category: String, sum: Double)] {
         let grouped = Dictionary(grouping: transactions, by: { $0.category?.first ?? "Uncategorized" })
         return grouped.map { key, txns in
-            (category: key, sum: txns.map { $0.amount }.reduce(0, +))
+            (category: key, sum: txns.map(\.amount).reduce(0, +))
         }
     }
 
     /// All unique categories across every account
     var uniqueCategories: [String] {
-        let allTxns = transactions.values.flatMap { $0 }
-        let cats = allTxns.flatMap { $0.category ?? [] }
+        let allTxns = transactionsByAccount.values.flatMap { $0 }
+        let cats = allTxns.compactMap { $0.category }.flatMap { $0 }
         return Array(Set(cats)).sorted()
     }
 
@@ -81,7 +80,7 @@ class BankAccountsViewModel: ObservableObject {
         for range: DateRange,
         category: String
     ) -> [PlaidTransaction] {
-        let all = transactions.values.flatMap { $0 }
+        let all = transactionsByAccount.values.flatMap { $0 }
         let now = Date()
         let start: Date
         switch range {
@@ -96,6 +95,7 @@ class BankAccountsViewModel: ObservableObject {
             let comps = Calendar.current.dateComponents([.year], from: now)
             start = Calendar.current.date(from: comps)!
         case .custom:
+            // you'll override with your customFrom/To in the view
             start = Calendar.current.date(byAdding: .day, value: -30, to: now)!
         }
         let dateFiltered = all.filter {
